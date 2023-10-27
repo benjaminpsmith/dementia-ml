@@ -1,0 +1,18 @@
+name: ewha_ml
+channels:
+  - pytorch
+  - defaults
+dependencies:
+  - python=3.8  # You can specify your preferred Python version
+  - numpy
+  - pandas
+  - pytorch
+  - matplotlib
+  - scikit-learn
+  - jupyter
+  - seaborn
+  - scipy
+  - ipython
+  - jupyterlab
+  - pillow
+  - torchvision
