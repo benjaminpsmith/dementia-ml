@@ -16,3 +16,5 @@ dependencies:
   - jupyterlab
   - pillow
   - torchvision
+  - graphviz
+  - torchviz
