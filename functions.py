@@ -334,7 +334,6 @@ class Custom_DNN(nn.Module):
                 self.linears.append(nn.Linear(nodes, output_size))
 
     def forward(self, x):
-        print(x.shape)
         for layer in self.linears[:-1]:
             x = self.dropout(F.leaky_relu(layer(x)))
 
