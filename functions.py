@@ -121,7 +121,7 @@ def get_accuracy_dataloader(model, dataloader, ignore_warning=False):
     acc_list = []
     with torch.no_grad():  # Disable gradient computation during validation
         for i, (x_minibatch, y_true) in enumerate(dataloader):
-            y_pred = model(x_minibatch)
+            y_pred = model(x_minibatch.float())
             y_cls = torch.argmax(F.softmax(y_pred, dim=1), dim=1)
             acc_list.append(accuracy_score(y_true, y_cls))
     return mean(acc_list)
@@ -161,22 +161,22 @@ def get_loss_no_training(model, dataloader, criterion, device = None, ignore_war
 
 class custom_ConvNet(nn.Module):
     def __init__(
-        self,
-        input_channels,
-        output_size, 
-        n_conv_layers1, 
-        n_filters1,
-        kernel_size1,
-        n_dense_layers,
-        n_dense_initial_nodes,
-        n_conv_layers2 = 0, 
-        n_filters2 = 0,
-        kernel_size2 = 0,
-        operation_and_factor_filter_size = ('*', 1),
-        operation_and_factor_dense_network = ('*', 1),
-        dropout_rate = 0,
-        pooling = None,
-        activation_function = F.leaky_relu,
+            self,
+            input_channels,
+            output_size, 
+            n_conv_layers1, 
+            n_filters1,
+            kernel_size1,
+            n_dense_layers,
+            n_dense_initial_nodes,
+            n_conv_layers2 = 0, 
+            n_filters2 = 0,
+            kernel_size2 = 0,
+            operation_and_factor_filter_size = ('*', 1),
+            operation_and_factor_dense_network = ('*', 1),
+            dropout_rate = 0,
+            pooling = None,
+            activation_function = F.leaky_relu,
         ):
 
         super(custom_ConvNet, self).__init__()
@@ -199,26 +199,24 @@ class custom_ConvNet(nn.Module):
         self.dropout = nn.Dropout(dropout_rate) if dropout_rate > 0 else None
         self.pool = nn.MaxPool2d(pooling[0], pooling[1]) if pooling is not None else None
 
-        # Initialize dummy parameters for first forward pass
-        self.input_size = None
-        self.input_dnn = None
-        self.n_dense_initial_nodes = n_dense_initial_nodes
-
         # Initialize the dense network
         for i in np.arange(n_dense_layers): 
-            if i == 0:
-                # The input size of the first linear layer will be calculated dynamically in the first forward call
-                self.dnn.append(nn.Linear(1, n_dense_initial_nodes))
+            if (i == 0):
                 nodes = n_dense_initial_nodes
+                if n_dense_layers > 1: 
+                    # The input size of the first linear layer will be calculated dynamically in the first forward call
+                    self.dnn.append(nn.Linear(1, n_dense_initial_nodes))
+                    # self.dnn.append(nn.Linear(128**2, n_dense_initial_nodes))
+                    nodes = n_dense_initial_nodes
 
             if ((i > 0) & (i < n_dense_layers - 1)):
-                output = operation_dnn(nodes, factor_dnn)
-                self.dnn.append(nn.Linear(nodes, operation_dnn(nodes, factor_dnn)))
+                output = operation_dnn(nodes, factor_dnn)   # Calculate the shrinking (/increasing) of layer to layer nodes (if any)
+                self.dnn.append(nn.Linear(nodes, output))
                 nodes = output
 
             if (i == n_dense_layers - 1):
                 print(f'Size last layer before output: {nodes}')
-                self.dnn.append(nn.Linear(nodes, output_size))
+                self.dnn.append(nn.Linear(nodes, output_size))  # Output of the last node needs to match the number of classes
 
         # Build the first convolutional network part
         for i in np.arange(n_conv_layers1): 
@@ -227,9 +225,9 @@ class custom_ConvNet(nn.Module):
                 previous_filters = n_filters1
 
             elif ((i > 0) & (i < n_conv_layers1)):
-                output_filters = operation_conv(nodes, factor_conv)
+                output_filters = operation_conv(previous_filters, factor_conv)  # Calculate the shrinking (/increasing) of layer to layer filters (if any)
                 self.cnn1.append(nn.Conv2d(previous_filters, output_filters, kernel_size1))
-                nodes = output_filters
+                previous_filters = output_filters
 
         # Build the second convolutional network part
         for i in np.arange(n_conv_layers2): 
@@ -238,62 +236,76 @@ class custom_ConvNet(nn.Module):
                 previous_filters = n_filters2
 
             elif ((i > 0) & (i < n_conv_layers2)):
-                output_filters = operation_conv(nodes, factor_conv)
+                output_filters = operation_conv(previous_filters, factor_conv)
                 self.cnn2.append(nn.Conv2d(previous_filters, output_filters, kernel_size2))
-                nodes = output_filters
+                previous_filters = output_filters
+
+        # Dummy value for first forward pass to get the size of x
+        self.input_size = None
+        self.n_dense_initial_nodes = n_dense_initial_nodes
 
     def forward(self, x):
-        x1 = x
-        for layer in self.cnn1[:-1]:
-            if ((self.pool is not None) & (self.dropout2d is not None)):
-                x1 = self.pool(self.activation_function(self.dropout2d(layer(x1))))
-            elif (self.pool is not None) & (self.dropout2d is None):
-                x1 = self.pool(self.activation_function(layer(x1)))
-            elif (self.pool is None) & (self.dropout2d is not None):
-                x1 = self.activation_function(self.dropout2d(layer(x1)))
-            else:
-                x1 = self.activation_function(layer(x1))
+        x1 = x.clone()
+        for layer in self.cnn1:
+            x1 = layer(x1)
+            x1 = self.dropout2d(x1) if self.dropout2d is not None else x1
+            x1 = self.activation_function(x1)
+            x1 = self.pool(x1) if self.pool is not None else x1
+
         x1 = x1.view(-1, x1.shape[1] * x1.shape[2] * x1.shape[3])
-        # x1 = x1.view(-1, x1.numel() // x1.size(0))
 
         if self.cnn2 is not None:
-            x2 = x
-            for layer in self.cnn2[:-1]:
-                if ((self.pool is not None) & (self.dropout2d is not None)):
-                    x2 = self.pool(self.activation_function(self.dropout2d(layer(x2))))
-                elif (self.pool is not None) & (self.dropout2d is None):
-                    x2 = self.pool(self.activation_function(layer(x2)))
-                elif (self.pool is None) & (self.dropout2d is not None):
-                    x2 = self.activation_function(self.dropout2d(layer(x2)))
-                else:
-                    x2 = self.activation_function(layer(x2))
+            x2 = x.clone()
+            for layer in self.cnn2:
+                x2 = layer(x2)
+                x2 = self.dropout2d(x2) if self.dropout2d is not None else x2
+                x2 = self.activation_function(x2)
+                x2 = self.pool(x2) if self.pool is not None else x2
             x2 = x2.view(-1, x2.shape[1] * x2.shape[2] * x2.shape[3])
-            # x2 = x2.view(-1, x2.numel() // x2.size(0))
         else:
             x2 = None
 
         # Put convolutional networks together
         x = torch.cat((x1, x2), dim=1) if x2 is not None else x1
-        # Set input dimension of first dense layer
-        self.dnn[0] = nn.Linear(x.shape[1], self.n_dense_initial_nodes)
+
+        # Set input dimension of first dense layer in first forward pass
+        if self.input_size is None:
+            self.input_size = x.shape[1]
+            self.dnn[0] = nn.Linear(self.input_size, self.n_dense_initial_nodes)
         
         for layer in self.dnn[:-1]:
-            if self.dropout is not None:
-                x = self.dropout(self.activation_function(layer(x)))
-            else:
-                x = self.activation_function(layer(x))
-
+            x = self.dropout(self.activation_function(layer(x))) if self.dropout is not None else self.activation_function(layer(x))
+        
         # Output layer
         x = self.dnn[-1](x)
         return x
-    
+
+    def evaluate(self, dataloader):
+        '''
+        Returns the predicted labels: y_cls, y_true
+        '''
+        state = False if self.training is False else True
+        if state: self.eval()
+        y_true = []
+        y_cls = []
+        with torch.no_grad():  # Disable gradient computation during validation
+            for i, (x_minibatch, y_true_batch) in enumerate(dataloader):
+                y_pred = self(x_minibatch)
+                y_cls_batch = torch.argmax(F.softmax(y_pred, dim=1), dim=1)
+                y_true.append(y_true_batch.tolist())
+                y_cls.append(y_cls_batch.tolist())
+        y_true = np.reshape(y_true, -1)
+        y_cls = np.reshape(y_cls, -1)
+        if state: self.train()
+        return y_cls, y_true
+
 class Custom_DNN(nn.Module):
     def __init__(self, input_size, initial_nodes, output_size, n_layers = 5, operation_and_factor = ('/', 2), dropout_rate=0):
         super(Custom_DNN, self).__init__()
         
         # Dynamically get the operation and the factor with which the network will later shrink/grow layer to layer
         # For simple dense neural networks an increase in nodes is very uncommon though
-        valid_operations = {'+': lambda x, y: x + y, '-': lambda x, y: x - y, '*': lambda x, y: x * y, '/': lambda x, y: x // y,'//': lambda x, y: x // y}
+        valid_operations = {'+': lambda x, y: int(x + y), '-': lambda x, y: int(x - y), '*': lambda x, y: int(x * y), '/': lambda x, y: x // y,'//': lambda x, y: x // y}
         operation, factor =  valid_operations.get(operation_and_factor[0], None), operation_and_factor[1]
 
         self.linears = nn.ModuleList()
@@ -306,7 +318,7 @@ class Custom_DNN(nn.Module):
 
             if ((i > 0) & (i < n_layers - 1)):
                 output = operation(nodes, factor)
-                self.linears.append(nn.Linear(nodes, operation(nodes, factor)))
+                self.linears.append(nn.Linear(nodes, output))
                 nodes = output
 
             if (i == n_layers - 1):
@@ -314,9 +326,29 @@ class Custom_DNN(nn.Module):
                 self.linears.append(nn.Linear(nodes, output_size))
 
     def forward(self, x):
+        print(x.shape)
         for layer in self.linears[:-1]:
             x = self.dropout(F.leaky_relu(layer(x)))
 
         # Output layer (no activation for regression tasks, modify as needed)
         x = self.linears[-1](x)
         return x
+    
+    def evaluate(self, dataloader):
+        '''
+        Returns the predicted labels in evaluation mode: y_cls, y_true
+        '''
+        state = False if self.training is False else True
+        if state: self.eval()
+        y_true = []
+        y_cls = []
+        with torch.no_grad():  # Disable gradient computation during validation
+            for i, (x_minibatch, y_true_batch) in enumerate(dataloader):
+                y_pred = self(x_minibatch)
+                y_cls_batch = torch.argmax(F.softmax(y_pred, dim=1), dim=1)
+                y_true.append(y_true_batch.tolist())
+                y_cls.append(y_cls_batch.tolist())
+        y_true = np.reshape(y_true, -1)
+        y_cls = np.reshape(y_cls, -1)
+        if state: self.train()
+        return y_cls, y_true
