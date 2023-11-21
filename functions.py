@@ -176,6 +176,7 @@ class custom_ConvNet(nn.Module):
             operation_and_factor_dense_network = ('*', 1),
             dropout_rate = 0,
             pooling = None,
+            nb_pooling_layers = np.inf,
             activation_function = F.leaky_relu,
         ):
 
@@ -198,6 +199,7 @@ class custom_ConvNet(nn.Module):
         self.dropout2d = nn.Dropout2d(dropout_rate) if dropout_rate > 0 else None
         self.dropout = nn.Dropout(dropout_rate) if dropout_rate > 0 else None
         self.pool = nn.MaxPool2d(pooling[0], pooling[1]) if pooling is not None else None
+        self.nb_pooling_layers = nb_pooling_layers if nb_pooling_layers is not None else 0
 
         # Initialize the dense network
         for i in np.arange(n_dense_layers): 
@@ -206,7 +208,6 @@ class custom_ConvNet(nn.Module):
                 if n_dense_layers > 1: 
                     # The input size of the first linear layer will be calculated dynamically in the first forward call
                     self.dnn.append(nn.Linear(1, n_dense_initial_nodes))
-                    # self.dnn.append(nn.Linear(128**2, n_dense_initial_nodes))
                     nodes = n_dense_initial_nodes
 
             if ((i > 0) & (i < n_dense_layers - 1)):
@@ -246,21 +247,28 @@ class custom_ConvNet(nn.Module):
 
     def forward(self, x):
         x1 = x.clone()
+
+        pooling_layer = 0
         for layer in self.cnn1:
             x1 = layer(x1)
             x1 = self.dropout2d(x1) if self.dropout2d is not None else x1
             x1 = self.activation_function(x1)
-            x1 = self.pool(x1) if self.pool is not None else x1
+            if pooling_layer < self.nb_pooling_layers:
+                x1 = self.pool(x1)
+                pooling_layer += 1
 
         x1 = x1.view(-1, x1.shape[1] * x1.shape[2] * x1.shape[3])
 
         if self.cnn2 is not None:
             x2 = x.clone()
+            pooling_layer = 0
             for layer in self.cnn2:
                 x2 = layer(x2)
                 x2 = self.dropout2d(x2) if self.dropout2d is not None else x2
                 x2 = self.activation_function(x2)
-                x2 = self.pool(x2) if self.pool is not None else x2
+            if pooling_layer < self.nb_pooling_layers:
+                x2 = self.pool(x2)
+                pooling_layer += 1
             x2 = x2.view(-1, x2.shape[1] * x2.shape[2] * x2.shape[3])
         else:
             x2 = None
