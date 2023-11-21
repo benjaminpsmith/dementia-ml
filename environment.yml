@@ -17,4 +17,4 @@ dependencies:
   - pillow
   - torchvision
   - graphviz
-  - torchviz
+  - pytorch-model-summary
