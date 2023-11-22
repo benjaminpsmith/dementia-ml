@@ -47,11 +47,11 @@ def train_network(model, dataloader, criterion, optimizer, num_epochs, learning_
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f'Device used for training: {device.type}')
 
-    n_total_steps = dataloader.__len__()
-    training_history = []           # Accuracy
-    validation_history = []         # Accuracy
-    loss_history_training = []      # Loss
-    loss_history_val = []           # Loss
+    # In case loss function was not provided for model history
+    if 'loss' not in model.evaluation_metrics:
+        def criterion_function(y_pred, y_cls, y_true):
+            return criterion(torch.tensor(y_pred), torch.tensor(y_true))
+    else: criterion_function = None
 
     model.train()
     for epoch in range(num_epochs):
@@ -69,95 +69,36 @@ def train_network(model, dataloader, criterion, optimizer, num_epochs, learning_
             loss.backward()
             optimizer.step()
 
-            if ((i+1) % (n_total_steps // 2) == 0):
-                print (f'Epoch [{epoch+1}/{num_epochs}], Step [{i+1}/{n_total_steps}], Loss: {loss.item():.4f}')
-
         # Update learning rate after 
         if learning_rate_scheduler:
             learning_rate_scheduler.step()
 
         # For evaluation of the model
-        # Set the model in evaluation mode
         model.eval()
 
-        # First calculate the models loss and accuracy AFTER the epoch (in evaluation mode)
-        loss_history_training.append(get_loss_no_training(model, dataloader, criterion, device=device))
-        training_history.append(get_accuracy_dataloader(model, dataloader))
+        y_pred, y_true = model.evaluate(dataloader)
+        y_cls = np.argmax(y_pred, axis=1)
+        for metric in model.evaluation_metrics.keys():
+            model.history[metric].append(model.evaluation_metrics[metric](y_pred, y_cls, y_true))
 
         # In case of provided validation set calculate and save the loss and accuracy (in eval mode) for the validation set
         if dataloader_val:
-            loss_history_val.append(get_loss_no_training(model, dataloader_val, criterion, device=device))
-            validation_history.append(get_accuracy_dataloader(model, dataloader_val))
+            y_pred, y_true = model.evaluate(dataloader_val)
+            y_cls = np.argmax(y_pred, axis=1)
+            for metric in model.evaluation_metrics.keys():
+                model.history_validation[metric].append(model.evaluation_metrics[metric](y_pred, y_cls, y_true))
+            print(f'Epoch [{epoch+1}/{num_epochs}]  {", ".join([f"{key}: {value[-1]:.4f}" for i, (key, value) in enumerate(model.history_validation.items())])}')
 
             # Check for early stopping, if provided
             if early_stopper is not None:
-                if early_stopper.early_stop(loss_history_val[-1]):
+                val_loss = model.history_validation["loss"][-1] if 'loss' in model.evaluation_metrics else criterion_function(y_pred, y_cls)
+                if early_stopper.early_stop(val_loss):
                     model.parameters = early_stopper.best_parameters
                     print("Early stopping triggered and model parameters has been set to best validation parameters")
-                    break  # You can break out of the training loop or take other actions
+                    break
 
         # Set model in training mode again
         model.train()
-
-    if not dataloader_val:
-        print("No validation dataloader was provided, therefore the validation history is empty. Validation data should be provided.")
-    return loss_history_training, loss_history_val, training_history, validation_history
-
-def get_accuracy_dataloader(model, dataloader, ignore_warning=False):
-    """
-    Calculate the accuracy of a PyTorch model on a given DataLoader.
-
-    Parameters:
-    - model             : The PyTorch model to evaluate.
-    - dataloader        : The DataLoader containing the evaluation data.
-    - ignore_warning    : If True, ignores the warning about the model being in training mode.
-
-    Returns The mean accuracy of the model on the provided DataLoader.
-    """
-
-    if (model.training & ignore_warning):
-        import warnings
-        warnings.warn("Model is in training mode, so dropout layers etc are considered. Set mode to mode.eval() ?")
-    acc_list = []
-    with torch.no_grad():  # Disable gradient computation during validation
-        for i, (x_minibatch, y_true) in enumerate(dataloader):
-            y_pred = model(x_minibatch.float())
-            y_cls = torch.argmax(F.softmax(y_pred, dim=1), dim=1)
-            acc_list.append(accuracy_score(y_true, y_cls))
-    return mean(acc_list)
-
-def get_loss_no_training(model, dataloader, criterion, device = None, ignore_warning = False):
-    """
-    Calculate the loss on a given dataset without updating the model's parameters.
-
-    Parameters:
-        model (torch.nn.Module): The PyTorch model to evaluate.
-        dataloader (torch.utils.data.DataLoader): DataLoader instance for the dataset.
-        criterion: The loss function that satisfies the inputs criterion(y_pred, y_true).
-        device (torch.device, optional): The device to perform calculations on (default is 'cuda' if available, else 'cpu').
-        ignore_warning (bool, optional): If True, ignore the warning about the model being in training mode.
-
-    Returns:
-        float: Mean loss over the dataset.
-    """
-    if not device:    
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    if (model.training & ignore_warning):
-        import warnings
-        warnings.warn("Model is in training mode, so dropout layers etc are considered. Set mode to mode.eval() ?")
-
-    loss_epoch = [] # To keep track of the loss during one epoch
-    with torch.no_grad():
-        for i, (x_minibatch, y_true) in enumerate(dataloader):
-            x_minibatch = x_minibatch.float()
-            x_minibatch = x_minibatch.to(device)
-            y_true = y_true.to(device)
-
-            # Predict the label of the samples
-            y_pred = model(x_minibatch)
-            loss = criterion(y_pred, y_true)
-            loss_epoch.append(loss.item())
-    return mean(loss_epoch)
 
 class custom_ConvNet(nn.Module):
     def __init__(
@@ -178,6 +119,7 @@ class custom_ConvNet(nn.Module):
             pooling = None,
             nb_pooling_layers = np.inf,
             activation_function = F.leaky_relu,
+            evaluation_metrics = {},
         ):
 
         super(custom_ConvNet, self).__init__()
@@ -245,6 +187,11 @@ class custom_ConvNet(nn.Module):
         self.input_size = None
         self.n_dense_initial_nodes = n_dense_initial_nodes
 
+        # Initialize history dict
+        self.evaluation_metrics = evaluation_metrics
+        self.history = {key: [] for key in evaluation_metrics.keys()}
+        self.history_validation = {key: [] for key in evaluation_metrics.keys()}
+
     def forward(self, x):
         x1 = x.clone()
 
@@ -290,25 +237,22 @@ class custom_ConvNet(nn.Module):
 
     def evaluate(self, dataloader):
         '''
-        Returns the predicted labels: y_cls, y_true
+        Returns the predicted labels in evaluation mode: y_pred, y_true
         '''
         state = False if self.training is False else True
         if state: self.eval()
         y_true = []
-        y_cls = []
+        y_pred = []
         with torch.no_grad():  # Disable gradient computation during validation
             for i, (x_minibatch, y_true_batch) in enumerate(dataloader):
-                y_pred = self(x_minibatch)
-                y_cls_batch = torch.argmax(F.softmax(y_pred, dim=1), dim=1)
-                y_true.append(y_true_batch.tolist())
-                y_cls.append(y_cls_batch.tolist())
-        y_true = np.reshape(y_true, -1)
-        y_cls = np.reshape(y_cls, -1)
+                y_pred_batch = F.softmax(self(x_minibatch), dim=1)
+                y_true.extend(y_true_batch.tolist())
+                y_pred.extend(y_pred_batch.tolist())
         if state: self.train()
-        return y_cls, y_true
+        return y_pred, y_true
 
 class Custom_DNN(nn.Module):
-    def __init__(self, input_size, initial_nodes, output_size, n_layers = 5, operation_and_factor = ('/', 2), dropout_rate=0):
+    def __init__(self, input_size, initial_nodes, output_size, n_layers = 5, operation_and_factor = ('/', 2), dropout_rate=0, evaluation_metrics = {}):
         super(Custom_DNN, self).__init__()
         
         # Dynamically get the operation and the factor with which the network will later shrink/grow layer to layer
@@ -333,6 +277,11 @@ class Custom_DNN(nn.Module):
                 print(f'Size last layer before output: {nodes}')
                 self.linears.append(nn.Linear(nodes, output_size))
 
+        # Initialize history dict
+        self.evaluation_metrics = evaluation_metrics
+        self.history = {key: [] for key in evaluation_metrics.keys()}
+        self.history_validation = {key: [] for key in evaluation_metrics.keys()}
+
     def forward(self, x):
         for layer in self.linears[:-1]:
             x = self.dropout(F.leaky_relu(layer(x)))
@@ -340,22 +289,114 @@ class Custom_DNN(nn.Module):
         # Output layer (no activation for regression tasks, modify as needed)
         x = self.linears[-1](x)
         return x
-    
+
     def evaluate(self, dataloader):
         '''
-        Returns the predicted labels in evaluation mode: y_cls, y_true
+        Returns the predicted labels in evaluation mode: y_pred, y_true
         '''
         state = False if self.training is False else True
         if state: self.eval()
         y_true = []
-        y_cls = []
+        y_pred = []
         with torch.no_grad():  # Disable gradient computation during validation
             for i, (x_minibatch, y_true_batch) in enumerate(dataloader):
-                y_pred = self(x_minibatch)
-                y_cls_batch = torch.argmax(F.softmax(y_pred, dim=1), dim=1)
-                y_true.append(y_true_batch.tolist())
-                y_cls.append(y_cls_batch.tolist())
-        y_true = np.reshape(y_true, -1)
-        y_cls = np.reshape(y_cls, -1)
+                y_pred_batch = F.softmax(self(x_minibatch), dim=1)
+                y_true.extend(y_true_batch.tolist())
+                y_pred.extend(y_pred_batch.tolist())
         if state: self.train()
-        return y_cls, y_true
+        return y_pred, y_true
+
+
+
+# Might be incorrect, was copy pasted from internet
+from torch.autograd import Variable
+
+class FocalLoss(nn.Module):
+    def __init__(self, gamma=0, alpha=None, size_average=True):
+        super(FocalLoss, self).__init__()
+        self.gamma = gamma
+        self.alpha = alpha
+        if isinstance(alpha,(float,int)): self.alpha = torch.Tensor([alpha,1-alpha])
+        if isinstance(alpha,list): self.alpha = torch.Tensor(alpha)
+        self.size_average = size_average
+
+    def forward(self, input, target):
+        if input.dim()>2:
+            input = input.view(input.size(0),input.size(1),-1)  # N,C,H,W => N,C,H*W
+            input = input.transpose(1,2)                        # N,C,H*W => N,H*W,C
+            input = input.contiguous().view(-1,input.size(2))   # N,H*W,C => N*H*W,C
+        target = target.view(-1,1)
+
+        logpt = F.log_softmax(input, dim=1)
+        logpt = logpt.gather(1,target)
+        logpt = logpt.view(-1)
+        pt = Variable(logpt.data.exp())
+
+        if self.alpha is not None:
+            if self.alpha.type()!=input.data.type():
+                self.alpha = self.alpha.type_as(input.data)
+            at = self.alpha.gather(0,target.data.view(-1))
+            logpt = logpt * Variable(at)
+
+        loss = -1 * (1-pt)**self.gamma * logpt
+        if self.size_average: return loss.mean()
+        else: return loss.sum()
+
+
+# No real use for these functions anymore.
+# use model.evaluate and calculate loss/acc/any metric separately
+def get_accuracy_dataloader(model, dataloader, ignore_warning=False):
+    """
+    Calculate the accuracy of a PyTorch model on a given DataLoader.
+
+    Parameters:
+    - model             : The PyTorch model to evaluate.
+    - dataloader        : The DataLoader containing the evaluation data.
+    - ignore_warning    : If True, ignores the warning about the model being in training mode.
+
+    Returns The mean accuracy of the model on the provided DataLoader.
+    """
+
+    if (model.training & ignore_warning):
+        import warnings
+        warnings.warn("Model is in training mode, so dropout layers etc are considered. Set mode to mode.eval() ?")
+    acc_list = []
+    with torch.no_grad():  # Disable gradient computation during validation
+        for i, (x_minibatch, y_true) in enumerate(dataloader):
+            y_pred = model(x_minibatch.float())
+            y_cls = torch.argmax(F.softmax(y_pred, dim=1), dim=1)
+            acc_list.append(accuracy_score(y_true, y_cls))
+    return mean(acc_list)
+
+def get_loss_no_training(model, dataloader, criterion, device = None, ignore_warning = False):
+    """
+    Calculate the loss on a given dataset without updating the model's parameters.
+
+    Parameters:
+        model (torch.nn.Module): The PyTorch model to evaluate.
+        dataloader (torch.utils.data.DataLoader): DataLoader instance for the dataset.
+        criterion: The loss function that satisfies the inputs criterion(y_pred, y_true).
+        device (torch.device, optional): The device to perform calculations on (default is 'cuda' if available, else 'cpu').
+        ignore_warning (bool, optional): If True, ignore the warning about the model being in training mode.
+
+    Returns:
+        float: Mean loss over the dataset.
+    """
+    if not device:    
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    if (model.training & ignore_warning):
+        import warnings
+        warnings.warn("Model is in training mode, so dropout layers etc are considered. Set mode to mode.eval() ?")
+
+    loss_epoch = [] # To keep track of the loss during one epoch
+    with torch.no_grad():
+        for i, (x_minibatch, y_true) in enumerate(dataloader):
+            x_minibatch = x_minibatch.float()
+            x_minibatch = x_minibatch.to(device)
+            y_true = y_true.to(device)
+
+            # Predict the label of the samples
+            y_pred = model(x_minibatch)
+            loss = criterion(y_pred, y_true)
+            loss_epoch.append(loss.item())
+    return mean(loss_epoch)
