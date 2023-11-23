@@ -252,30 +252,27 @@ class custom_ConvNet(nn.Module):
         return y_pred, y_true
 
 class Custom_DNN(nn.Module):
-    def __init__(self, input_size, initial_nodes, output_size, n_layers = 5, operation_and_factor = ('/', 2), dropout_rate=0, evaluation_metrics = {}):
-        super(Custom_DNN, self).__init__()
-        
+    def __init__(self, input_size, initial_nodes, output_size, n_layers=5, operation_and_factor=('/', 2), dropout_rate=0, evaluation_metrics={}):
+        super().__init__()  # Use super() without arguments
+
         # Dynamically get the operation and the factor with which the network will later shrink/grow layer to layer
-        # For simple dense neural networks an increase in nodes is very uncommon though
-        valid_operations = {'+': lambda x, y: int(x + y), '-': lambda x, y: int(x - y), '*': lambda x, y: int(x * y), '/': lambda x, y: x // y,'//': lambda x, y: x // y}
-        operation, factor =  valid_operations.get(operation_and_factor[0], None), operation_and_factor[1]
+        # For simple dense neural networks, an increase in nodes is very uncommon though
+        valid_operations = {'+': lambda x, y: int(x + y), '-': lambda x, y: int(x - y), '*': lambda x, y: int(x * y),
+                            '/': lambda x, y: x // y, '//': lambda x, y: x // y}
+        operation, factor = valid_operations.get(operation_and_factor[0], None), operation_and_factor[1]
 
         self.linears = nn.ModuleList()
         self.dropout = nn.Dropout(dropout_rate)
 
-        for i in np.arange(n_layers): 
-            if i == 0:
-                self.linears.append(nn.Linear(input_size, initial_nodes))
-                nodes = initial_nodes
+        nodes = input_size  # Start with the input size for the first layer
 
-            if ((i > 0) & (i < n_layers - 1)):
-                output = operation(nodes, factor)
-                self.linears.append(nn.Linear(nodes, output))
-                nodes = output
+        for i in range(n_layers - 1):  # Exclude the last layer in the loop
+            output = operation(nodes, factor)
+            self.linears.append(nn.Linear(nodes, output))
+            nodes = output
 
-            if (i == n_layers - 1):
-                print(f'Size last layer before output: {nodes}')
-                self.linears.append(nn.Linear(nodes, output_size))
+        # Add the last layer separately
+        self.linears.append(nn.Linear(nodes, output_size))
 
         # Initialize history dict
         self.evaluation_metrics = evaluation_metrics
