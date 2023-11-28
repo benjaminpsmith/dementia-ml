@@ -12,13 +12,13 @@ class EarlyStopper:
         self.min_delta = min_delta
         self.counter = 0
         self.min_validation_loss = float('inf')
-        self.best_parameters = None
+        self.best_parameters_state_dict = None
 
     def early_stop(self, validation_loss):
         if validation_loss < self.min_validation_loss:
             self.min_validation_loss = validation_loss
             self.counter = 0
-            self.best_parameters = self.model.parameters()
+            self.best_parameters_state_dict = self.model.state_dict()
         elif validation_loss > (self.min_validation_loss + self.min_delta):
             self.counter += 1
             if self.counter >= self.patience:
@@ -89,16 +89,20 @@ def train_network(model, dataloader, criterion, optimizer, num_epochs, learning_
                 model.history_validation[metric].append(model.evaluation_metrics[metric](y_pred, y_cls, y_true))
             print(f'Epoch [{epoch+1}/{num_epochs}]  {", ".join([f"{key}: {value[-1]:.4f}" for i, (key, value) in enumerate(model.history_validation.items())])}')
 
+            # Set model in training mode again
+            model.train()
             # Check for early stopping, if provided
             if early_stopper is not None:
                 val_loss = model.history_validation["loss"][-1] if 'loss' in model.evaluation_metrics else criterion_function(y_pred, y_cls)
                 if early_stopper.early_stop(val_loss):
-                    model.parameters = early_stopper.best_parameters
+                    # Load the best parameters into the model
+                    model.load_state_dict(early_stopper.best_parameters_state_dict)
                     print("Early stopping triggered and model parameters has been set to best validation parameters")
                     break
 
         # Set model in training mode again
         model.train()
+    
 
 class custom_ConvNet(nn.Module):
     def __init__(
@@ -158,7 +162,7 @@ class custom_ConvNet(nn.Module):
                 nodes = output
 
             if (i == n_dense_layers - 1):
-                print(f'Size last layer before output: {nodes}')
+                # print(f'Size last layer before output: {nodes}')
                 self.dnn.append(nn.Linear(nodes, output_size))  # Output of the last node needs to match the number of classes
 
         # Build the first convolutional network part
@@ -200,6 +204,8 @@ class custom_ConvNet(nn.Module):
             x1 = layer(x1)
             x1 = self.dropout2d(x1) if self.dropout2d is not None else x1
             x1 = self.activation_function(x1)
+            batch_norm = nn.BatchNorm2d(num_features=x1.size(1), eps=1e-5, momentum=0.1, affine=True, track_running_stats=True)
+            x1 = batch_norm(x1)
             if pooling_layer < self.nb_pooling_layers:
                 x1 = self.pool(x1)
                 pooling_layer += 1
@@ -213,6 +219,9 @@ class custom_ConvNet(nn.Module):
                 x2 = layer(x2)
                 x2 = self.dropout2d(x2) if self.dropout2d is not None else x2
                 x2 = self.activation_function(x2)
+                batch_norm = nn.BatchNorm2d(num_features=x2.size(1), eps=1e-5, momentum=0.1, affine=True, track_running_stats=True)
+                x2 = batch_norm(x2)
+                nn.BatchNorm2d
             if pooling_layer < self.nb_pooling_layers:
                 x2 = self.pool(x2)
                 pooling_layer += 1
@@ -230,6 +239,8 @@ class custom_ConvNet(nn.Module):
         
         for layer in self.dnn[:-1]:
             x = self.dropout(self.activation_function(layer(x))) if self.dropout is not None else self.activation_function(layer(x))
+            batch_norm = nn.BatchNorm1d(num_features=x.size(1), eps=1e-5, momentum=0.1, affine=True, track_running_stats=True)
+            x = batch_norm(x)
         
         # Output layer
         x = self.dnn[-1](x)
@@ -239,7 +250,7 @@ class custom_ConvNet(nn.Module):
         '''
         Returns the predicted labels in evaluation mode: y_pred, y_true
         '''
-        state = False if self.training is False else True
+        state = True if self.training is True else False
         if state: self.eval()
         y_true = []
         y_pred = []
@@ -274,7 +285,7 @@ class Custom_DNN(nn.Module):
                 nodes = output
 
             if (i == n_layers - 1):
-                print(f'Size last layer before output: {nodes}')
+                # print(f'Size last layer before output: {nodes}')
                 self.linears.append(nn.Linear(nodes, output_size))
 
         # Initialize history dict

@@ -1,0 +1,1 @@
+{'n_cnn_layers_1': 1, 'n_filters_1': 3, 'kernel_size_1': 4, 'n_cnn_layers_2': 1, 'n_filters_2': 2, 'kernel_size_2': 2, 'num_dense_layers': 2, 'num_dense_nodes': 256, 'factor': 2}
