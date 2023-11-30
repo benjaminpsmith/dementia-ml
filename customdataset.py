@@ -94,9 +94,6 @@ def import_data():
     # Dynamically calculate the number of classes in the dataset
     num_classes = len(np.unique(Y))
 
-    X = np.array(X)
-    Y = np.array(Y)
-
     return X, Y, num_classes
 
 def split_data(X, Y, train_per, val_per, test_per):
