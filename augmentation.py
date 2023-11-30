@@ -5,24 +5,20 @@ from torchvision.transforms import v2
 resize_x = 256
 resize_y = 256
 
-gl_mean = 0
-gl_std = 1
-
-noise_constant = 0
-
-def add_noise_gaussian(tensor, mean=gl_mean*noise_constant , std=gl_std*noise_constant):
+def add_noise_gaussian(tensor):
     """
     Parameters:
     - tensor: PyTorch tensor data type without noise (input)
-    - mean: Mean of the Gaussian distribution
-    - std: Standard deviation of the Gaussian distribution
 
     Returns:
     - tensor + noise: PyTorch tensor data type with noise (output)
     """
-    std = std * (tensor.max() - tensor.min())
-    mean = mean * (tensor.max() - tensor.min())
-    
+
+    constant = 0.2
+
+    mean = tensor.mean() * constant
+    std = tensor.std() * constant
+
     noise = torch.randn(tensor.size()) * std + mean
     return tensor + noise
 
@@ -62,31 +58,6 @@ def set_resize_x_y(resize_x, resize_y):
 
     resize_x = resize_x
     resize_y = resize_y
-
-def set_noise_constant(constant):
-    """
-    Parameters:
-    - constant: Noise constant
-
-    Returns:
-    - None
-    """
-    global noise_constant
-    noise_constant = constant
-
-def set_mean_std(mean, std):
-    """
-    Parameters:
-    - mean: Mean of the Gaussian distribution
-    - std: Standard deviation of the Gaussian distribution
-
-    Returns:
-    - None
-    """
-    global gl_mean
-    global gl_std
-    gl_mean = mean
-    gl_std = std
 
 transforms = {
     'toTensor': v2.Compose([

@@ -41,13 +41,7 @@ class MyDataset(Dataset):
 
             random_num = random.uniform(0.0, 1.0)
 
-            mean = np.mean(img)
-            std = np.std(img)
-
-            set_mean_std(mean, std)
-
             if(random_num < 0.2):
-                print("Gaussian noise added")
                 img = transforms['noise_gaussian'](img)
             elif(random_num < 0.4):
                 img = transforms['noise_salt_pepper'](img)
