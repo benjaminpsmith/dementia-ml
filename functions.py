@@ -318,8 +318,6 @@ class Custom_DNN(nn.Module):
         return y_pred, y_true
 
 
-
-# Might be incorrect, was copy pasted from internet
 from torch.autograd import Variable
 
 class FocalLoss(nn.Module):
