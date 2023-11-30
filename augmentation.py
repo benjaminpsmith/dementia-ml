@@ -14,7 +14,7 @@ def add_noise_gaussian(tensor):
     - tensor + noise: PyTorch tensor data type with noise (output)
     """
 
-    constant = 0.2
+    constant = 0.15
 
     mean = tensor.mean() * constant
     std = tensor.std() * constant
