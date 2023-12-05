@@ -1,0 +1,1 @@
+{'n_cnn_layers_1': 6, 'n_filters_1': 12, 'kernel_size_1': 8}
