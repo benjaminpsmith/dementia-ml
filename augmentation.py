@@ -14,7 +14,8 @@ def add_noise_gaussian(tensor):
     - tensor + noise: PyTorch tensor data type with noise (output)
     """
 
-    constant = 0.15
+    # constant = 0.25
+    constant = 0.35
 
     mean = tensor.mean() * constant
     std = tensor.std() * constant
@@ -22,7 +23,8 @@ def add_noise_gaussian(tensor):
     noise = torch.randn(tensor.size()) * std + mean
     return tensor + noise
 
-def add_noise_salt_pepper(tensor, salt_prob = 0.01, pepper_prob = 0.01):
+# def add_noise_salt_pepper(tensor, salt_prob = 0.01, pepper_prob = 0.01):
+def add_noise_salt_pepper(tensor, salt_prob = 0.02, pepper_prob = 0.02):
     """
     Parameters:
     - tensor: PyTorch tensor data type without noise (input)
@@ -37,7 +39,6 @@ def add_noise_salt_pepper(tensor, salt_prob = 0.01, pepper_prob = 0.01):
     salt_mask = (torch.rand_like(tensor) < salt_prob).float() # * 0.35 * X_std
     pepper_mask = (torch.rand_like(tensor) < pepper_prob).float() # * 0.35 * X_std
 
-    # return torch.clamp((tensor + salt_mask - pepper_mask), 0, 1)
     return torch.clamp((tensor + salt_mask - pepper_mask), 0, 1)
 
 def set_resize_x_y(resize_x, resize_y):
